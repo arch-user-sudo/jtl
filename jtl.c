@@ -1417,7 +1417,7 @@ setup(void)
 	wlr_server_decoration_manager_set_default_mode(
 			wlr_server_decoration_manager_create(dpy),
 			WLR_SERVER_DECORATION_MANAGER_MODE_SERVER);
-	xdg_decoration_mgr = wlr_xdg_decoration_manager_v1_create(dpy);
+	xdg_decoration_mgr = wlr_xdg_decoration_manager_v1_create(dpy, 2);
 	wl_signal_add(&xdg_decoration_mgr->events.new_toplevel_decoration,
 			&new_xdg_decoration);
 	unsetenv("DISPLAY");
