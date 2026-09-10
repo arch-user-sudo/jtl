@@ -108,6 +108,12 @@ typedef struct {
 } ClientAnim;
 
 typedef struct {
+	struct wlr_xdg_popup *xdg_popup;
+	struct wl_listener commit;
+	struct wl_listener destroy;
+} Popup;
+
+typedef struct {
 
 	unsigned int type;
 	int pending_fullscreen;
@@ -292,6 +298,7 @@ static void createpopup(struct wl_listener *listener, void *data);
 static void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint);
 static void cursorframe(struct wl_listener *listener, void *data);
 static void cursorwarptohint(void);
+static void destroypopup(struct wl_listener *listener, void *data);
 static void destroydragicon(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroynotify(struct wl_listener *listener, void *data);
@@ -678,14 +685,27 @@ commitlayersurfacenotify(struct wl_listener *listener, void *data)
 }
 
 static void
+destroypopup(struct wl_listener *listener, void *data)
+{
+	Popup *popup;
+	popup = wl_container_of(listener, popup, destroy);
+	wl_list_remove(&popup->commit.link);
+	wl_list_remove(&popup->destroy.link);
+	free(popup);
+}
+
+static void
 commitpopup(struct wl_listener *listener, void *data)
 {
-	struct wlr_surface *surface = data;
-	struct wlr_xdg_popup *popup = wlr_xdg_popup_try_from_wlr_surface(surface);
+	Popup *p;
+	struct wlr_xdg_popup *popup;
 	LayerSurface *l = NULL;
 	Client *c = NULL;
 	struct wlr_box box;
 	int type = -1;
+
+	p = wl_container_of(listener, p, commit);
+	popup = p->xdg_popup;
 
 	if (!popup->base->initial_commit)
 		return;
@@ -703,8 +723,6 @@ commitpopup(struct wl_listener *listener, void *data)
 	box.x -= (type == LayerShell ? l->scene->node.x : c->geom.x);
 	box.y -= (type == LayerShell ? l->scene->node.y : c->geom.y);
 	wlr_xdg_popup_unconstrain_from_box(popup, &box);
-	wl_list_remove(&listener->link);
-	free(listener);
 }
 
 static void
@@ -926,9 +944,16 @@ createpointerconstraint(struct wl_listener *listener, void *data)
 static void
 createpopup(struct wl_listener *listener, void *data)
 {
+	struct wlr_xdg_popup *xdg_popup;
+	Popup *popup;
 
-	struct wlr_xdg_popup *popup = data;
-	LISTEN_STATIC(&popup->base->surface->events.commit, commitpopup);
+	xdg_popup = data;
+	popup = ecalloc(1, sizeof(*popup));
+	popup->xdg_popup = xdg_popup;
+	popup->commit.notify = commitpopup;
+	wl_signal_add(&xdg_popup->base->surface->events.commit, &popup->commit);
+	popup->destroy.notify = destroypopup;
+	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
 }
 
 static void
