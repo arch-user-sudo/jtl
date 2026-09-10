@@ -435,7 +435,11 @@ static void workspaces_remove_for_monitor(Monitor *m);
 static void workspaces_handle_commit(struct wl_listener *listener, void *data);
 #endif
 
+static struct wlr_xdg_shell *xdg_shell;
+static struct wlr_xdg_decoration_manager_v1 *xdg_decoration_mgr;
+static struct wlr_layer_shell_v1 *layer_shell;
 static struct wlr_output_manager_v1 *output_mgr;
+static struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
 static struct wlr_pointer_constraints_v1 *pointer_constraints;
 static struct wlr_relative_pointer_manager_v1 *relative_pointer_mgr;
 
@@ -1344,9 +1348,6 @@ setsel(struct wl_listener *listener, void *data)
 static void
 setup(void)
 {
-	struct wlr_xdg_shell *xdg_shell;
-	struct wlr_layer_shell_v1 *layer_shell;
-	struct wlr_xdg_decoration_manager_v1 *xdg_decoration_mgr;
 	int drm_fd, i, sig[] = {SIGCHLD, SIGINT, SIGTERM, SIGPIPE};
 	struct sigaction sa = {.sa_flags = SA_RESTART, .sa_handler = handlesig};
 	sigemptyset(&sa.sa_mask);
@@ -1425,9 +1426,7 @@ setup(void)
 
 static void
 setupinput(void)
-{
-	struct wlr_cursor_shape_manager_v1 *cursor_shape_mgr;
-	pointer_constraints = wlr_pointer_constraints_v1_create(dpy);
+{	pointer_constraints = wlr_pointer_constraints_v1_create(dpy);
 	wl_signal_add(&pointer_constraints->events.new_constraint, &new_pointer_constraint);
 
 	relative_pointer_mgr = wlr_relative_pointer_manager_v1_create(dpy);
@@ -2487,6 +2486,8 @@ setmon(Client *c, Monitor *m, uint32_t newtags)
 				c->prev.x += m->m.x - (oldmon ? oldmon->m.x : 0);
 				c->prev.y += m->m.y - (oldmon ? oldmon->m.y : 0);
 				resize(c, m->m);
+			} else {
+				setfullscreen(c, c->isfullscreen);
 			}
 			c->suppress_arrange = saved_suppress;
 			if (!c->suppress_arrange)
@@ -2740,7 +2741,6 @@ unmapnotify(struct wl_listener *listener, void *data)
 			focusclient(focustop(selmon), 1);
 		}
 	} else {
-		tween_cancel(c);
 		wl_list_remove(&c->link);
 		setmon(c, NULL, 0);
 		wl_list_remove(&c->flink);
@@ -2880,7 +2880,6 @@ tween_cancel(Client *c)
 
 struct anim_scale_data {
 	struct wlr_box dest;
-	struct wlr_surface *surface;
 };
 
 static void
@@ -2896,14 +2895,18 @@ static void
 scale_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *user_data)
 {
 	struct anim_scale_data *data = user_data;
-	struct wlr_scene_surface *scene_surface =
-			wlr_scene_surface_try_from_buffer(buffer);
-
-	/* Only resize the toplevel's own buffer. Sub-surfaces and popups are
-	 * sized and placed by the client relative to the root; squeezing them
-	 * to the window's content box renders them oversized while tweening. */
-	if (!scene_surface || scene_surface->surface != data->surface)
-		return;
+	{
+		struct wlr_scene_surface *scene_surface =
+				wlr_scene_surface_try_from_buffer(buffer);
+		if (scene_surface) {
+			struct wlr_xdg_surface *xdg_surface =
+					wlr_xdg_surface_try_from_wlr_surface(
+					scene_surface->surface);
+			if (xdg_surface && xdg_surface->role
+					!= WLR_XDG_SURFACE_ROLE_TOPLEVEL)
+				return;
+		}
+	}
 
 	wlr_scene_buffer_set_dest_size(buffer, data->dest.width, data->dest.height);
 }
@@ -2954,12 +2957,8 @@ animateclient(Client *c)
 			opacity_buffer, &opacity);
 
 	if (animating) {
-		/* Fit the root buffer to the content box while tweening; this only
-		 * touches the toplevel's own buffer, leaving sub-surfaces and popups
-		 * alone at all times. */
 		struct anim_scale_data scale = {
 			.dest = { .width = cw, .height = ch },
-			.surface = client_surface(c),
 		};
 		wlr_scene_node_for_each_buffer(
 				&c->scene_surface->node,

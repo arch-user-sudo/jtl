@@ -86,7 +86,7 @@ static const unsigned int gappiv = 5;
 /* ======================== KEYBOARD ======================== */
 
 /* Key repeat rate (characters per second) and delay (ms before repeat starts) */
-static const int repeat_rate = 50;
+static const int repeat_rate = 40;
 static const int repeat_delay = 250;
 
 
